@@ -8,6 +8,136 @@ HEADING = ("TkDefaultFont", 11, "bold")
 TITLE = ("TkDefaultFont", 12, "bold")
 
 
+class EditExpenseDialog(tk.Toplevel):
+    def __init__(self, parent, expense, on_saved):
+        super().__init__(parent)
+        self.expense = expense
+        self.on_saved = on_saved
+        self.title("Edit Expense")
+        self.resizable(False, False)
+        self.columnconfigure(1, weight=1)
+
+        tk.Label(self, text="Edit Expense", font=HEADING).grid(
+            row=0, column=0, columnspan=2, sticky="w", padx=20, pady=(20, 10))
+
+        self.amount_entry = self._row(1, "Amount (₦):", f"{expense.amount:.2f}")
+
+        tk.Label(self, text="Category:").grid(row=2, column=0, sticky="w", padx=(20, 0), pady=5)
+        self.category_var = tk.StringVar(value=expense.category)
+        ttk.Combobox(self, textvariable=self.category_var, values=logic.CATEGORIES,
+                     state="readonly", width=26).grid(
+            row=2, column=1, sticky="ew", padx=(10, 20), pady=5)
+
+        self.desc_entry = self._row(3, "Description:", expense.description)
+        self.date_entry = self._row(4, "Date (YYYY-MM-DD):", expense.date)
+
+        buttons = tk.Frame(self)
+        buttons.grid(row=5, column=0, columnspan=2, sticky="e", padx=20, pady=(14, 20))
+        tk.Button(buttons, text="Save", command=self.save, width=10).pack(side="left", padx=(0, 8))
+        tk.Button(buttons, text="Cancel", command=self.destroy, width=10).pack(side="left")
+
+        self.transient(parent)
+        self.grab_set()
+
+    def _row(self, row, label, value):
+        tk.Label(self, text=label).grid(row=row, column=0, sticky="w", padx=(20, 0), pady=5)
+        entry = tk.Entry(self, width=28)
+        entry.insert(0, value)
+        entry.grid(row=row, column=1, sticky="ew", padx=(10, 20), pady=5)
+        return entry
+
+    def save(self):
+        try:
+            logic.update_expense(self.expense.id, self.amount_entry.get(),
+                                 self.category_var.get(), self.desc_entry.get(),
+                                 self.date_entry.get())
+        except (ValueError, LookupError) as e:
+            messagebox.showerror("Error", str(e), parent=self)
+            return
+        self.destroy()
+        self.on_saved()
+
+
+class HistoryWindow(tk.Toplevel):
+    COLUMNS = ("Category", "Description", "Amount (₦)", "Date")
+    WIDTHS = {"Category": 110, "Description": 230, "Amount (₦)": 110, "Date": 120}
+
+    def __init__(self, parent):
+        super().__init__(parent)
+        self.expenses = {}
+        self.title("All Expenses")
+        self.geometry("580x470")
+        self.resizable(False, False)
+
+        tk.Label(self, text="Expense History", font=TITLE).pack(pady=(12, 6))
+
+        frame = tk.Frame(self)
+        frame.pack(fill="both", expand=True, padx=12, pady=(0, 6))
+        sb = ttk.Scrollbar(frame, orient="vertical")
+        sb.pack(side="right", fill="y")
+        self.tree = ttk.Treeview(frame, columns=self.COLUMNS, show="headings",
+                                 selectmode="browse", yscrollcommand=sb.set)
+        sb.config(command=self.tree.yview)
+        for col in self.COLUMNS:
+            self.tree.heading(col, text=col)
+            self.tree.column(col, width=self.WIDTHS[col], anchor="center")
+        self.tree.pack(fill="both", expand=True)
+        self.tree.bind("<Double-1>", lambda event: self.edit_selected())
+
+        buttons = tk.Frame(self)
+        buttons.pack(fill="x", padx=12)
+        tk.Button(buttons, text="Edit", command=self.edit_selected, width=10).pack(side="left", padx=(0, 8))
+        tk.Button(buttons, text="Delete", command=self.delete_selected, width=10).pack(side="left")
+
+        footer = tk.Frame(self)
+        footer.pack(fill="x", padx=12, pady=8)
+        self.total_label = tk.Label(footer, font=BOLD)
+        self.total_label.pack(side="left")
+        self.remaining_label = tk.Label(footer, font=BOLD)
+        self.remaining_label.pack(side="right")
+
+        self.refresh()
+
+    def refresh(self):
+        expenses, total, remaining = logic.get_expenses_report()
+        self.expenses = {e.id: e for e in expenses}
+
+        self.tree.delete(*self.tree.get_children())
+        for e in expenses:
+            self.tree.insert("", tk.END, iid=str(e.id),
+                             values=(e.category, e.description, f"{e.amount:,.2f}", e.date))
+
+        self.total_label.config(text=f"Total Spent: ₦{total:,.2f}")
+        self.remaining_label.config(
+            text="" if remaining is None else f"Remaining: ₦{remaining:,.2f}")
+
+    def _selected(self):
+        selection = self.tree.selection()
+        if not selection:
+            messagebox.showwarning("Select a row", "Select an expense first", parent=self)
+            return None
+        return self.expenses[int(selection[0])]
+
+    def edit_selected(self):
+        expense = self._selected()
+        if expense is not None:
+            EditExpenseDialog(self, expense, on_saved=self.refresh)
+
+    def delete_selected(self):
+        expense = self._selected()
+        if expense is None:
+            return
+        if not messagebox.askyesno(
+                "Delete Expense",
+                f"Delete '{expense.description}' (₦{expense.amount:,.2f})?", parent=self):
+            return
+        try:
+            logic.delete_expense(expense.id)
+        except LookupError as e:
+            messagebox.showerror("Error", str(e), parent=self)
+        self.refresh()
+
+
 class BudgetApp:
     def __init__(self, root):
         self.root = root
@@ -118,40 +248,10 @@ class BudgetApp:
         self.category_var.set(logic.CATEGORY_PLACEHOLDER)
 
     def view_expenses(self):
-        expenses, total, remaining = logic.get_expenses_report()
-        if not expenses:
+        if not logic.get_expenses_report()[0]:
             messagebox.showinfo("Info", "No expenses recorded yet.")
             return
-
-        win = tk.Toplevel(self.root)
-        win.title("All Expenses")
-        win.geometry("580x420")
-        win.resizable(False, False)
-        tk.Label(win, text="Expense History", font=TITLE).pack(pady=(12, 6))
-
-        cols = ("Category", "Description", "Amount (₦)", "Date")
-        widths = {"Category": 110, "Description": 230, "Amount (₦)": 110, "Date": 120}
-
-        frame = tk.Frame(win)
-        frame.pack(fill="both", expand=True, padx=12, pady=(0, 6))
-        sb = ttk.Scrollbar(frame, orient="vertical")
-        sb.pack(side="right", fill="y")
-        tree = ttk.Treeview(frame, columns=cols, show="headings", yscrollcommand=sb.set)
-        sb.config(command=tree.yview)
-        for col in cols:
-            tree.heading(col, text=col)
-            tree.column(col, width=widths[col], anchor="center")
-        tree.pack(fill="both", expand=True)
-
-        for e in expenses:
-            tree.insert("", tk.END, values=(e.category, e.description,
-                                            f"{e.amount:,.2f}", e.date))
-
-        footer = tk.Frame(win)
-        footer.pack(fill="x", padx=12, pady=6)
-        tk.Label(footer, text=f"Total Spent: ₦{total:,.2f}", font=BOLD).pack(side="left")
-        if remaining is not None:
-            tk.Label(footer, text=f"Remaining: ₦{remaining:,.2f}", font=BOLD).pack(side="right")
+        HistoryWindow(self.root)
 
     def show_summary(self):
         month = self.month_entry.get().strip()

@@ -41,7 +41,7 @@ def get_budget():
     return database.fetch_budget()
 
 
-def add_expense(amount_text, category, desc, date):
+def _clean_expense(amount_text, category, desc, date):
     amount_text, desc, date = amount_text.strip(), desc.strip(), date.strip()
 
     if not all([amount_text, desc, date]) or category == CATEGORY_PLACEHOLDER:
@@ -57,7 +57,19 @@ def add_expense(amount_text, category, desc, date):
     except ValueError:
         raise ValueError("Enter a valid date in YYYY-MM-DD format")
 
-    database.insert_expense(amount, category, desc, date)
+    return amount, category, desc, date
+
+
+def add_expense(amount_text, category, desc, date):
+    database.insert_expense(*_clean_expense(amount_text, category, desc, date))
+
+
+def update_expense(expense_id, amount_text, category, desc, date):
+    database.update_expense(expense_id, *_clean_expense(amount_text, category, desc, date))
+
+
+def delete_expense(expense_id):
+    database.delete_expense(expense_id)
 
 
 def get_expenses_report():

@@ -65,6 +65,25 @@ def insert_expense(amount, category, description, date):
                       description=description, date=date))
 
 
+def update_expense(expense_id, amount, category, description, date):
+    with session_scope() as s:
+        expense = s.get(Expense, expense_id)
+        if expense is None:
+            raise LookupError("This expense no longer exists")
+        expense.amount = amount
+        expense.category = category
+        expense.description = description
+        expense.date = date
+
+
+def delete_expense(expense_id):
+    with session_scope() as s:
+        expense = s.get(Expense, expense_id)
+        if expense is None:
+            raise LookupError("This expense no longer exists")
+        s.delete(expense)
+
+
 def fetch_expenses():
     with session_scope() as s:
         stmt = select(Expense).order_by(Expense.date.desc(), Expense.id.desc())
